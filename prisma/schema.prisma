@@ -1,0 +1,225 @@
+// Sheriff Department Panel — Prisma schema (PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  LEADER
+  DEPUTY
+  CURATOR
+  EMPLOYEE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  FIRED
+}
+
+enum FormStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum FormType {
+  APPLICATION
+  REPORT
+  OTHER
+}
+
+enum SubmissionStatus {
+  NEW
+  NOTIFIED
+  NO_EMPLOYEE
+  NO_FORM
+  FAILED
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENDING
+  DELIVERED
+  FAILED
+  DEAD
+}
+
+model Employee {
+  id           String         @id @default(cuid())
+  fullName     String
+  login        String?        @unique
+  passwordHash String?
+  role         Role           @default(EMPLOYEE)
+  rank         String?
+  division     String?
+  status       EmployeeStatus @default(ACTIVE)
+  gameId       String?
+  discordTag   String?
+  hiredAt      DateTime?
+  firedAt      DateTime?
+  notes        String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  reports     Report[]
+  submissions FormSubmission[]
+
+  @@index([fullName])
+  @@index([status])
+  @@index([division])
+}
+
+model Report {
+  id          String    @id @default(cuid())
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  type        String    @default("other")
+  title       String
+  content     Json?
+  source      String    @default("manual")
+  externalId  String?   @unique
+  submittedAt DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([employeeId])
+  @@index([submittedAt])
+  @@index([type])
+}
+
+model Form {
+  id            String     @id @default(cuid())
+  title         String
+  description   String?
+  type          FormType   @default(APPLICATION)
+  status        FormStatus @default(DRAFT)
+  formKey       String?    @unique
+  googleFormId  String?    @unique
+  googleFormUrl String?
+  questions     Json?
+
+  // ---- Настройки Discord-вебхука этой формы (приоритет над глобальными) ----
+  webhookEnabled   Boolean @default(true)
+  webhookUrlEnc    String? // URL вебхука хранится зашифрованным (AES-256-GCM)
+  webhookUsername  String?
+  webhookAvatarUrl String?
+  webhookContent   String?
+  webhookTitle     String?
+  webhookColor     Int?
+  webhookFooter    String?
+  webhookTimestamp Boolean @default(true)
+  webhookMention   String?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions FormSubmission[]
+
+  @@index([status])
+}
+
+model FormSubmission {
+  id         String           @id @default(cuid())
+  formId     String?
+  form       Form?            @relation(fields: [formId], references: [id], onDelete: SetNull)
+  externalId String?          @unique
+  answers    Json
+  employeeId String?
+  employee   Employee?        @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  status     SubmissionStatus @default(NEW)
+  meta       Json?
+  receivedAt DateTime         @default(now())
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  deliveryJobs DeliveryJob[]
+
+  @@index([formId])
+  @@index([status])
+  @@index([receivedAt])
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  category     String?
+  googleDocId  String?
+  googleDocUrl String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Integration {
+  id            String    @id @default(cuid())
+  kind          String    @unique
+  status        String    @default("not_configured")
+  details       Json?
+  lastCheckedAt DateTime?
+  updatedAt     DateTime  @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  kind      String
+  title     String
+  body      String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorLogin String?
+  actorRole  String?
+  action     String
+  entity     String?
+  entityId   String?
+  details    Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+  @@index([actorLogin])
+}
+
+model DeliveryJob {
+  id                  String          @id @default(cuid())
+  kind                String          @default("discord_webhook")
+  targetUrlEnc        String?
+  targetUrlMasked     String?
+  payload             Json
+  status              DeliveryStatus  @default(PENDING)
+  attempts            Int             @default(0)
+  maxAttempts         Int             @default(5)
+  lastError           String?
+  nextAttemptAt       DateTime        @default(now())
+  dedupeKey           String?         @unique
+  relatedSubmissionId String?
+  submission          FormSubmission? @relation(fields: [relatedSubmissionId], references: [id], onDelete: SetNull)
+  deliveredAt         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([status])
+  @@index([nextAttemptAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
