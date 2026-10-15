@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { sendWebhook } from './discord';
 import { decryptSecret } from './crypto';
+import { packJson, unpackJson } from './jsonField';
 
 /**
  * Очередь доставки DeliveryJob: ретраи с экспоненциальным backoff,
@@ -29,7 +30,7 @@ export async function enqueueDiscord(input: EnqueueDiscordInput) {
       kind: 'discord_webhook',
       targetUrlEnc: input.targetUrl,
       targetUrlMasked: input.maskedUrl || null,
-      payload: input.payload as any,
+      payload: packJson(input.payload) as string,
       dedupeKey: input.dedupeKey,
       relatedSubmissionId: input.relatedSubmissionId ?? null,
     },
@@ -54,7 +55,7 @@ export async function processOnce(): Promise<number> {
       continue;
     }
 
-    const result = await sendWebhook(url, job.payload);
+    const result = await sendWebhook(url, unpackJson<Record<string, unknown>>(job.payload, {}));
 
     if (result.ok) {
       await prisma.deliveryJob.update({

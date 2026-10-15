@@ -25,7 +25,7 @@ Google Forms API не присылает уведомления о новых о
 ```
 Google Form ──(триггер onSubmit)──> Apps Script ──POST /api/integrations/ingest──> Панель
                                                                                      │
-                                              PostgreSQL (идемпотентно по ID ответа) ┤
+                                              база SQLite (идемпотентно по ID ответа) ┤
                                                                                      ▼
                                               Discord-вебхук формы (текст/цвет/аватарка)
 ```

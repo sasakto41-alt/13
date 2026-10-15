@@ -3,6 +3,7 @@ import { sendWebhook, buildWebhookPayload } from './discord';
 import { uploadBackupToDrive } from './google';
 import { env } from '../config/env';
 import { isoDay } from './csv';
+import { packJson, unpackJson } from './jsonField';
 
 /**
  * Ежедневное резервное копирование: дамп основных таблиц в JSON ->
@@ -25,14 +26,14 @@ export async function collectBackupJson(): Promise<string> {
   ]);
   return JSON.stringify(
     {
-      version: 1,
+      version: 2,
       createdAt: new Date().toISOString(),
       employees,
-      forms: forms.map((f) => ({ ...f, webhookUrlEnc: '•••' })),
-      submissions,
-      reports,
+      forms: forms.map((f) => ({ ...f, webhookUrlEnc: '•••', questions: unpackJson<any[]>(f.questions, []) })),
+      submissions: submissions.map((s) => ({ ...s, answers: unpackJson<any[]>(s.answers, []), meta: unpackJson<any>(s.meta, null) })),
+      reports: reports.map((r) => ({ ...r, content: unpackJson<any>(r.content, null) })),
       documents,
-      settings,
+      settings: settings.map((s) => ({ ...s, value: unpackJson<any>(s.value, null) })),
     },
     null,
     2
@@ -41,14 +42,14 @@ export async function collectBackupJson(): Promise<string> {
 
 async function lastRunDay(): Promise<string | null> {
   const row = await prisma.appSetting.findUnique({ where: { key: BACKUP_TIME_KEY } });
-  return row ? String((row.value as any)?.day ?? '') : null;
+  return row ? String(unpackJson<any>(row.value, {}).day ?? '') : null;
 }
 
 async function markRun(day: string) {
   await prisma.appSetting.upsert({
     where: { key: BACKUP_TIME_KEY },
-    create: { key: BACKUP_TIME_KEY, value: { day } as any },
-    update: { value: { day } as any },
+    create: { key: BACKUP_TIME_KEY, value: packJson({ day }) as string },
+    update: { value: packJson({ day }) as string },
   });
 }
 

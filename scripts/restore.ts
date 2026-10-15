@@ -2,11 +2,19 @@
  * Восстановление из JSON-копии (см. docs/BACKUP.md).
  * Запуск: npm run restore -- путь/к/backup.json
  * Восстанавливаются сотрудники, формы, ответы, отчёты, документы.
+ * Поддерживаются копии обоих форматов: v1 (объекты) и v2 (JSON-строки).
  */
 import fs from 'fs';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+/** Приводит JSON-поле к строке (как хранится в SQLite) независимо от формата копии */
+function asJsonString(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === 'string') return v;
+  return JSON.stringify(v);
+}
 
 async function main() {
   const file = process.argv[2];
@@ -31,23 +39,30 @@ async function main() {
     created.employees++;
   }
   for (const f of data.forms || []) {
+    // webhookUrlEnc из копии — маска '•••', не перезаписываем им реальный URL
+    const { webhookUrlEnc, ...fRest } = f;
+    const existing = await prisma.form.findUnique({ where: { id: f.id } });
     await prisma.form.upsert({
       where: { id: f.id },
-      create: { ...f },
-      update: { title: f.title, description: f.description, status: f.status, type: f.type, questions: f.questions },
+      create: { ...fRest, webhookUrlEnc: existing?.webhookUrlEnc ?? null, questions: asJsonString(f.questions) },
+      update: { title: f.title, description: f.description, status: f.status, type: f.type, questions: asJsonString(f.questions) },
     });
     created.forms++;
   }
   for (const s of data.submissions || []) {
     await prisma.formSubmission.upsert({
       where: { id: s.id },
-      create: { ...s },
+      create: { ...s, answers: asJsonString(s.answers) ?? '[]', meta: asJsonString(s.meta) },
       update: { status: s.status },
     });
     created.submissions++;
   }
   for (const r of data.reports || []) {
-    await prisma.report.upsert({ where: { id: r.id }, create: { ...r }, update: { title: r.title } });
+    await prisma.report.upsert({
+      where: { id: r.id },
+      create: { ...r, content: asJsonString(r.content) },
+      update: { title: r.title },
+    });
     created.reports++;
   }
   for (const d of data.documents || []) {

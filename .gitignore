@@ -10,3 +10,8 @@ Thumbs.db
 coverage/
 backups/
 *.tsbuildinfo
+
+# Локальная база данных SQLite
+data/
+*.db
+*.db-journal

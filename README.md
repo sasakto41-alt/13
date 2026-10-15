@@ -24,7 +24,7 @@
   текст сообщения, упоминание, цвет линии embed, аватарка, имя отправителя,
   заголовок, footer, время. Живой предпросмотр сообщения, кнопка «Проверить вебхук».
 - **Приём ответов**: Google Apps Script (триггер onFormSubmit, на основе рабочего
-  скрипта) → защищённый endpoint → PostgreSQL → Discord. Идемпотентность по ID ответа
+  скрипта) → защищённый endpoint → SQLite → Discord. Идемпотентность по ID ответа
   — повторная отправка не создаёт дублей. Сопоставление сотрудника по игровому ID /
   Discord-тегу / никнейму, метки «Сотрудник не найден», «Форма не найдена».
 - **Очередь доставки DeliveryJob**: ретраи с экспоненциальным backoff (до 1 часа,
@@ -45,31 +45,37 @@
 |------|------------|
 | Frontend | React 18, TypeScript, Vite, React Router, Recharts, тёмная тема Sheriff |
 | Backend | Node.js 18+, Express 4, TypeScript, REST API, Zod-валидация |
-| База | PostgreSQL, Prisma ORM, SQL-миграции (применяются автоматически при старте) |
+| База | SQLite (файл `data/panel.db`, сервер БД не нужен), Prisma ORM |
 | Интеграции | Google Forms/Docs/Drive API (сервисный аккаунт), Google Apps Script, Discord Webhooks |
 | Развёртывание | GitHub → Railway (Nixpacks), healthcheck `/api/health` |
 
 ## Быстрый старт локально
 
+База данных НЕ нужна — всё хранится в файле `data/panel.db`, который создаётся сам.
+
 ```bash
 npm install
-cp .env.example .env            # заполните DATABASE_URL, SESSION_SECRET, SETUP_SECRET
-npm run db:generate             # генерация Prisma Client (при необходимости)
-npx prisma migrate deploy       # применение миграций (нужен PostgreSQL)
-npm run build                   # сборка клиента и сервера
-npm start                       # запуск на http://localhost:3000
+copy .env.example .env          # Windows (в PowerShell); в macOS/Linux: cp .env.example .env
+#                                минимально: задайте SESSION_SECRET (и SETUP_SECRET)
+npm run dev                     # запустит сервер (:3001) и Vite (:5173)
 ```
 
-Первое открытие предложит **создать аккаунт лидера** (потребует `SETUP_SECRET`,
-если он указан в `.env`).
+База создаётся автоматически при первом запуске (`npm run dev` / `npm start` /
+`npm run setup`). Первое открытие панели предложит **создать аккаунт лидера**
+(потребует `SETUP_SECRET`, если он указан в `.env`).
 
-Для разработки с hot-reload: `npm run dev` (сервер :3001, Vite :5173 с прокси `/api`).
+Продакшн-режим одной услугой (Express отдаёт собранный фронтенд):
+
+```bash
+npm run build
+npm start                       # http://localhost:3000
+```
 
 ## Развёртывание
 
-Пошагово: [docs/RAILWAY.md](docs/RAILWAY.md) — GitHub → Railway → PostgreSQL →
-переменные окружения → первый запуск. Приложение применяет миграции и стартует
-одной командой (`npm start`).
+Пошагово: [docs/RAILWAY.md](docs/RAILWAY.md) — GitHub → Railway → переменные
+окружения → первый запуск. База — файл `data/panel.db`; для сохранения данных
+при редеплоях подключите Volume (см. инструкцию).
 
 Инструкции по интеграциям:
 
@@ -82,7 +88,7 @@ npm start                       # запуск на http://localhost:3000
 ## Переменные окружения
 
 Полный список с пояснениями — в [.env.example](.env.example). Обязательный минимум:
-`DATABASE_URL`, `SESSION_SECRET`. Рекомендуются: `ENCRYPTION_KEY`, `SETUP_SECRET`,
+`SESSION_SECRET`. Рекомендуются: `SETUP_SECRET`, `ENCRYPTION_KEY`,
 `INTEGRATION_SHARED_SECRET`, `APP_TIMEZONE`.
 
 ## Скрипты
@@ -90,8 +96,9 @@ npm start                       # запуск на http://localhost:3000
 | Команда | Назначение |
 |---------|-----------|
 | `npm run build` | сборка сервера (tsc) и клиента (Vite) |
-| `npm start` | миграции + запуск продакшн-сервера |
+| `npm start` | создание/обновление базы + запуск продакшн-сервера |
 | `npm run dev` | параллельный запуск dev-сервера и Vite |
+| `npm run setup` | создать/обновить файл базы данных без запуска сервера |
 | `npm test` | unit-тесты ключевых сценариев (vitest) |
 | `npm run seed` | демо-данные (только с `SEED_ALLOW=true`, локально!) |
 | `npm run restore` | восстановление из JSON-копии (с `RESTORE_ALLOW=true`) |
@@ -102,12 +109,19 @@ npm start                       # запуск на http://localhost:3000
 ```
 ├── client/            # SPA (React + TS): страницы, компоненты, тема
 ├── server/            # Express API: routes/, lib/ (discord, delivery, google, crypto…)
-├── prisma/            # schema.prisma (10 моделей) + SQL-миграции
+├── prisma/            # schema.prisma (10 моделей, SQLite)
 ├── apps-script/       # Code.gs — приём ответов Google Forms (образец)
 ├── docs/              # инструкции по настройке и ограничения
-├── scripts/           # seed / restore / smoke
+├── scripts/           # ensure-db / seed / restore / smoke
 └── tests/             # unit-тесты (vitest)
 ```
+
+## База данных
+
+SQLite-файл `data/panel.db` (в корне проекта). Сервер БД устанавливать и
+настраивать не нужно. Схема применяется автоматически при каждом старте
+(`prisma db push` — идемпотентно, данные не трогает). Резервная копия — это
+просто копия файла `panel.db` плюс ежедневные JSON-дампы (см. docs/BACKUP.md).
 
 ## Безопасность
 
@@ -125,5 +139,5 @@ npm start                       # запуск на http://localhost:3000
 `npm test` — 19 unit-тестов: подпись/подделка/просрочка токенов, AES-256-GCM,
 сборка Discord-embed (разбивка полей по 1024, цвет/аватар/footer, упоминания),
 CSV с BOM и экранированием, нормализация никнеймов, backoff очереди.
-Сквозной smoke-тест API: `npm run smoke` (требует запущенный сервер; с БД
-проверяет и первичную настройку).
+Сквозной smoke-тест API: `npm run smoke` (требует запущенный сервер; проверяет
+и первичную настройку).

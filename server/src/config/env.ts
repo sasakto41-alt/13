@@ -20,7 +20,7 @@ export const env = {
   isProd: (process.env.NODE_ENV || 'development') === 'production',
   port: Number(process.env.PORT || 3000),
 
-  databaseUrl: optional('DATABASE_URL'),
+  databaseFile: 'data/panel.db (SQLite, создаётся автоматически)',
   sessionSecret: required('SESSION_SECRET', 'dev-only-session-secret-change-me-please-32'),
   encryptionKey: optional('ENCRYPTION_KEY'),
   setupSecret: optional('SETUP_SECRET'),

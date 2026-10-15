@@ -34,22 +34,20 @@ function parsePagination(req: any) {
 }
 
 function buildWhere(req: any) {
+  // Поиск q обрабатывается отдельно в JS (SQLite не умеет регистронезависимый
+  // contains для кириллицы) — здесь только статус и подразделение.
   const where: any = {};
-  const q = String(req.query.q || '').trim();
   const status = String(req.query.status || 'ALL');
   const division = String(req.query.division || '').trim();
   if (status !== 'ALL') where.status = status;
   if (division) where.division = division;
-  if (q) {
-    where.OR = [
-      { fullName: { contains: q, mode: 'insensitive' } },
-      { login: { contains: q, mode: 'insensitive' } },
-      { gameId: { contains: q } },
-      { discordTag: { contains: q, mode: 'insensitive' } },
-      { rank: { contains: q, mode: 'insensitive' } },
-    ];
-  }
   return where;
+}
+
+function matchesQuery(e: any, needle: string): boolean {
+  return [e.fullName, e.login, e.gameId, e.discordTag, e.rank].some(
+    (v) => String(v || '').toLowerCase().includes(needle)
+  );
 }
 
 // Список + поиск
@@ -58,12 +56,22 @@ router.get(
   requireRole('LEADER', 'DEPUTY', 'CURATOR'),
   ah(async (req, res) => {
     const where = buildWhere(req);
+    const q = String(req.query.q || '').trim().toLowerCase();
     const { page, pageSize, skip, take } = parsePagination(req);
+    const divisions = await prisma.employee.findMany({ distinct: ['division'], select: { division: true }, where: { division: { not: null } } });
+
+    if (q) {
+      // Регистронезависимый поиск (включая кириллицу) — фильтр в JS, пагинация после него
+      const all = await prisma.employee.findMany({ where, orderBy: [{ status: 'asc' }, { createdAt: 'desc' }], select: employeeSelect });
+      const filtered = all.filter((e) => matchesQuery(e, q));
+      const items = filtered.slice((page - 1) * pageSize, page * pageSize);
+      return res.json({ items, total: filtered.length, page, pageSize, divisions: divisions.map((d) => d.division) });
+    }
+
     const [items, total] = await Promise.all([
       prisma.employee.findMany({ where, orderBy: [{ status: 'asc' }, { createdAt: 'desc' }], skip, take, select: employeeSelect }),
       prisma.employee.count({ where }),
     ]);
-    const divisions = await prisma.employee.findMany({ distinct: ['division'], select: { division: true }, where: { division: { not: null } } });
     res.json({ items, total, page, pageSize, divisions: divisions.map((d) => d.division) });
   })
 );
@@ -112,6 +120,33 @@ router.post(
     });
     await audit(req, 'employees.create', 'Employee', employee.id, { fullName: employee.fullName, role: employee.role });
     res.status(201).json({ item: employee });
+  })
+);
+
+// Экспорт CSV (UTF-8 BOM) — ВАЖНО: объявлен ДО /:id, иначе перехватывается карточкой сотрудника
+router.get(
+  '/export.csv',
+  requireRole('LEADER', 'DEPUTY', 'CURATOR'),
+  ah(async (req, res) => {
+    const where = buildWhere(req);
+    const items = await prisma.employee.findMany({ where, orderBy: { createdAt: 'desc' } });
+    const rows: (string | number | null)[][] = [
+      ['ФИО', 'Логин', 'Роль', 'Звание', 'Подразделение', 'Статус', 'Игровой ID', 'Discord', 'Дата приёма', 'Дата увольнения'],
+      ...items.map((e) => [
+        e.fullName,
+        e.login,
+        e.role,
+        e.rank,
+        e.division,
+        e.status,
+        e.gameId,
+        e.discordTag,
+        e.hiredAt ? e.hiredAt.toISOString() : null,
+        e.firedAt ? e.firedAt.toISOString() : null,
+      ]),
+    ];
+    await audit(req, 'employees.export_csv');
+    sendCsv(res, 'employees.csv', rows);
   })
 );
 
@@ -221,33 +256,6 @@ router.post(
     });
     await audit(req, 'employees.restore', 'Employee', employee.id, { fullName: employee.fullName });
     res.json({ item: employee });
-  })
-);
-
-// Экспорт CSV (UTF-8 BOM)
-router.get(
-  '/export.csv',
-  requireRole('LEADER', 'DEPUTY', 'CURATOR'),
-  ah(async (req, res) => {
-    const where = buildWhere(req);
-    const items = await prisma.employee.findMany({ where, orderBy: { createdAt: 'desc' } });
-    const rows: (string | number | null)[][] = [
-      ['ФИО', 'Логин', 'Роль', 'Звание', 'Подразделение', 'Статус', 'Игровой ID', 'Discord', 'Дата приёма', 'Дата увольнения'],
-      ...items.map((e) => [
-        e.fullName,
-        e.login,
-        e.role,
-        e.rank,
-        e.division,
-        e.status,
-        e.gameId,
-        e.discordTag,
-        e.hiredAt ? e.hiredAt.toISOString() : null,
-        e.firedAt ? e.firedAt.toISOString() : null,
-      ]),
-    ];
-    await audit(req, 'employees.export_csv');
-    sendCsv(res, 'employees.csv', rows);
   })
 );
 

@@ -11,6 +11,7 @@ import { sendWebhook, buildWebhookPayload, isValidWebhookUrl } from '../lib/disc
 import { googleConfigured, createGoogleForm, QuestionDef } from '../lib/google';
 import { env } from '../config/env';
 import { renderAppsScriptTemplate } from '../lib/appsScriptTemplate';
+import { packJson, unpackJson } from '../lib/jsonField';
 
 const router = Router();
 router.use(requireAuth);
@@ -70,7 +71,7 @@ function publicForm(f: any) {
     formKey: f.formKey,
     googleFormId: f.googleFormId,
     googleFormUrl: f.googleFormUrl,
-    questions: f.questions,
+    questions: unpackJson<any[]>(f.questions, []),
     webhook: {
       enabled: f.webhookEnabled,
       hasCustomUrl: Boolean(f.webhookUrlEnc),
@@ -133,7 +134,7 @@ router.post(
         type: body.type,
         status: body.status,
         googleFormUrl: body.googleFormUrl || null,
-        questions: body.questions as any,
+        questions: packJson(body.questions || []),
         formKey: `F-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,
         webhookUrlEnc: encryptSecret(body.webhookUrl || null),
         ...webhookData(wh),
@@ -163,7 +164,7 @@ router.patch(
       type: body.type,
       status: body.status,
       googleFormUrl: body.googleFormUrl === undefined ? undefined : body.googleFormUrl || null,
-      questions: body.questions === undefined ? undefined : (body.questions as any),
+      questions: body.questions === undefined ? undefined : packJson(body.questions),
     };
 
     if (body.webhookUrl !== undefined) {
@@ -256,7 +257,7 @@ router.post(
     if (!googleConfigured()) {
       throw notConfigured('Google API не настроено (GOOGLE_SERVICE_ACCOUNT_JSON). См. docs/GOOGLE-API.md');
     }
-    const questions = (form.questions as any as QuestionDef[]) || [];
+    const questions = unpackJson<QuestionDef[]>(form.questions, []);
     if (!questions.length) throw badRequest('Добавьте хотя бы один вопрос в конструкторе');
     const created = await createGoogleForm({
       title: form.title,
@@ -288,7 +289,7 @@ router.get(
       await prisma.form.update({ where: { id: form.id }, data: { formKey } });
     }
     const settings = await prisma.appSetting.findUnique({ where: { key: 'panelUrl' } });
-    const panelUrl = settings ? String((settings.value as any)?.url || '') : `${req.protocol}://${req.get('host')}`;
+    const panelUrl = settings ? String(unpackJson<any>(settings.value, {}).url || '') : `${req.protocol}://${req.get('host')}`;
     const code = renderAppsScriptTemplate({ panelUrl, sharedSecret: env.sharedSecret, formKey });
     res.json({ code, formKey, panelUrl });
   })

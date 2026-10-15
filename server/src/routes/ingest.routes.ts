@@ -8,6 +8,7 @@ import { maskWebhookUrl } from '../lib/mask';
 import { encryptSecret, decryptSecret } from '../lib/crypto';
 import { nickEquals, nickContains, normalizeNick } from '../lib/nickname';
 import { HttpError, ah } from '../lib/httpError';
+import { packJson } from '../lib/jsonField';
 
 const router = Router();
 
@@ -62,15 +63,15 @@ router.post(
       data: {
         formId: form?.id || null,
         externalId,
-        answers: answers as any,
+        answers: packJson(answers) as string,
         employeeId: employee?.id || null,
         status: form ? (employee ? 'NEW' : 'NO_EMPLOYEE') : 'NO_FORM',
-        meta: {
+        meta: packJson({
           formTitle,
           respondentEmail,
           submittedAt: submittedAt.toISOString(),
           matchedBy: employee?.matchedBy || null,
-        } as any,
+        }),
       },
     });
 
@@ -82,7 +83,7 @@ router.post(
             employeeId: employee.id,
             type: 'form_report',
             title: form.title,
-            content: answers as any,
+            content: packJson(answers),
             source: 'google_form',
             externalId: externalId || `submission:${submission.id}`,
             submittedAt,
@@ -179,7 +180,9 @@ async function matchEmployee(answers: { question: string; answer: string }[], re
     if (q(a.question).includes('discord') || q(a.question).includes('дискорд')) {
       const val = a.answer.trim();
       if (val.length >= 2) {
-        const emp = await prisma.employee.findFirst({ where: { discordTag: { equals: val, mode: 'insensitive' }, status: { not: 'FIRED' } } });
+        // SQLite не умеет регистронезависимое equals — сравниваем в JS
+        const candidates = await prisma.employee.findMany({ where: { discordTag: { not: null }, status: { not: 'FIRED' } } });
+        const emp = candidates.find((e) => (e.discordTag || '').toLowerCase() === val.toLowerCase());
         if (emp) return { id: emp.id, fullName: emp.fullName, matchedBy: 'discordTag' };
       }
     }

@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import { prisma } from './prisma';
+import { packJson } from './jsonField';
 
 const SECRET_KEY_RE = /(password|secret|token|url|key)/i;
 
@@ -32,7 +33,7 @@ export async function audit(
         action,
         entity: entity || null,
         entityId: entityId || null,
-        details: (sanitizeDetails(details) as any) ?? undefined,
+        details: packJson(sanitizeDetails(details)) ?? undefined,
         ip: req.ip || null,
       },
     });

@@ -47,7 +47,6 @@ async function bootstrapLeader() {
 
 async function main() {
   if (env.isProd) {
-    if (!env.databaseUrl) throw new Error('DATABASE_URL обязателен в production');
     if (env.sessionSecret.startsWith('dev-only')) {
       throw new Error('SESSION_SECRET должен быть задан случайной строкой в production');
     }

@@ -7,6 +7,7 @@ import { audit } from '../lib/audit';
 import { ah } from '../lib/httpError';
 import { googleConfigured, credentialsEmail } from '../lib/google';
 import { maskWebhookUrl } from '../lib/mask';
+import { packJson, unpackJson } from '../lib/jsonField';
 
 const router = Router();
 router.use(requireAuth);
@@ -37,8 +38,8 @@ router.get(
     await Promise.all([
       prisma.integration.upsert({
         where: { kind: 'google' },
-        create: { kind: 'google', status: googleConfigured() ? 'configured' : 'not_configured', details: { email: credentialsEmail() }, lastCheckedAt: new Date() },
-        update: { status: googleConfigured() ? 'configured' : 'not_configured', details: { email: credentialsEmail() }, lastCheckedAt: new Date() },
+        create: { kind: 'google', status: googleConfigured() ? 'configured' : 'not_configured', details: packJson({ email: credentialsEmail() }), lastCheckedAt: new Date() },
+        update: { status: googleConfigured() ? 'configured' : 'not_configured', details: packJson({ email: credentialsEmail() }), lastCheckedAt: new Date() },
       }),
       prisma.integration.upsert({
         where: { kind: 'discord' },
@@ -64,9 +65,9 @@ router.get(
         webhooks,
         anyConfigured: anyWebhook,
       },
-      panelUrl: panelUrlRow ? String((panelUrlRow.value as any)?.url || '') : '',
+      panelUrl: panelUrlRow ? String(unpackJson<any>(panelUrlRow.value, {}).url || '') : '',
       lastDeliveryAt: lastDelivery?.deliveredAt || null,
-      lastBackupDay: lastBackup ? String((lastBackup.value as any)?.day || '') : null,
+      lastBackupDay: lastBackup ? String(unpackJson<any>(lastBackup.value, {}).day || '') : null,
       warnings: warnIfMisconfigured(),
       cookieSecure: env.cookieSecure,
       statsTz: env.statsTz,
@@ -86,8 +87,8 @@ router.put(
     }
     await prisma.appSetting.upsert({
       where: { key: 'panelUrl' },
-      create: { key: 'panelUrl', value: { url: data.url } as any },
-      update: { value: { url: data.url } as any },
+      create: { key: 'panelUrl', value: packJson({ url: data.url }) as string },
+      update: { value: packJson({ url: data.url }) as string },
     });
     await audit(req, 'settings.panel_url', undefined, undefined, { url: data.url });
     res.json({ ok: true, url: data.url });

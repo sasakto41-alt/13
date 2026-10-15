@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth';
 import { audit } from '../lib/audit';
 import { badRequest, ah } from '../lib/httpError';
 import { sendCsv } from '../lib/csv';
+import { packJson, unpackJson } from '../lib/jsonField';
 
 const router = Router();
 router.use(requireAuth);
@@ -22,7 +23,7 @@ router.get(
 
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(5, Number(req.query.pageSize || 20)));
-    const [items, total] = await Promise.all([
+    const [rawItems, total] = await Promise.all([
       prisma.report.findMany({
         where,
         orderBy: { submittedAt: 'desc' },
@@ -32,6 +33,7 @@ router.get(
       }),
       prisma.report.count({ where }),
     ]);
+    const items = rawItems.map((r) => ({ ...r, content: unpackJson<any>(r.content, null) }));
     res.json({ items, total, page, pageSize });
   })
 );
@@ -56,13 +58,13 @@ router.post(
         employeeId: employee.id,
         type: data.type,
         title: data.title,
-        content: data.content ? { text: data.content } : undefined,
+        content: data.content ? packJson({ text: data.content }) : undefined,
         source: 'manual',
       },
       include: { employee: { select: { id: true, fullName: true, rank: true } } },
     });
     await audit(req, 'reports.create', 'Report', report.id, { employee: employee.fullName, title: data.title });
-    res.status(201).json({ item: report });
+    res.status(201).json({ item: { ...report, content: unpackJson<any>(report.content, null) } });
   })
 );
 
@@ -135,7 +137,10 @@ router.get(
         r.type,
         r.title,
         r.source,
-        (r.content as any)?.text || (Array.isArray(r.content) ? (r.content as any[]).map((a) => `${a?.question}: ${a?.answer}`).join(' | ') : ''),
+        (() => {
+          const c = unpackJson<any>(r.content, null);
+          return c?.text || (Array.isArray(c) ? c.map((a) => `${a?.question}: ${a?.answer}`).join(' | ') : '');
+        })(),
       ]),
     ];
     await audit(req, 'reports.export_csv');

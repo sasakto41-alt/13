@@ -1,71 +1,45 @@
-// Sheriff Department Panel — Prisma schema (PostgreSQL)
+// Sheriff Department Panel — Prisma schema (SQLite)
+//
+// База данных — обычный файл data/panel.db рядом с проектом.
+// Сервер БД (PostgreSQL) НЕ нужен: файл создаётся автоматически
+// при первом запуске (npm run dev / npm start / npm run setup).
+//
+// Особенности SQLite:
+//  - enum'ы не поддерживаются → статусы хранятся строками:
+//      role:               LEADER | DEPUTY | CURATOR | EMPLOYEE
+//      status (Employee):  ACTIVE | ON_LEAVE | FIRED
+//      status (Form):      DRAFT | ACTIVE | ARCHIVED
+//      type (Form):        APPLICATION | REPORT | OTHER
+//      status (Submission):NEW | NOTIFIED | NO_EMPLOYEE | NO_FORM | FAILED
+//      status (Delivery):  PENDING | SENDING | DELIVERED | FAILED | DEAD
+//  - Json не поддерживается → JSON-поля хранятся строками
+//    (JSON.stringify/parse через server/src/lib/jsonField.ts)
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
-enum Role {
-  LEADER
-  DEPUTY
-  CURATOR
-  EMPLOYEE
-}
-
-enum EmployeeStatus {
-  ACTIVE
-  ON_LEAVE
-  FIRED
-}
-
-enum FormStatus {
-  DRAFT
-  ACTIVE
-  ARCHIVED
-}
-
-enum FormType {
-  APPLICATION
-  REPORT
-  OTHER
-}
-
-enum SubmissionStatus {
-  NEW
-  NOTIFIED
-  NO_EMPLOYEE
-  NO_FORM
-  FAILED
-}
-
-enum DeliveryStatus {
-  PENDING
-  SENDING
-  DELIVERED
-  FAILED
-  DEAD
+  provider = "sqlite"
+  url      = "file:../data/panel.db"
 }
 
 model Employee {
-  id           String         @id @default(cuid())
+  id           String   @id @default(cuid())
   fullName     String
-  login        String?        @unique
+  login        String?  @unique
   passwordHash String?
-  role         Role           @default(EMPLOYEE)
+  role         String   @default("EMPLOYEE") // LEADER | DEPUTY | CURATOR | EMPLOYEE
   rank         String?
   division     String?
-  status       EmployeeStatus @default(ACTIVE)
+  status       String   @default("ACTIVE") // ACTIVE | ON_LEAVE | FIRED
   gameId       String?
   discordTag   String?
   hiredAt      DateTime?
   firedAt      DateTime?
   notes        String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   reports     Report[]
   submissions FormSubmission[]
@@ -81,7 +55,7 @@ model Report {
   employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   type        String    @default("other")
   title       String
-  content     Json?
+  content     String? // JSON: { text } или массив ответов формы
   source      String    @default("manual")
   externalId  String?   @unique
   submittedAt DateTime  @default(now())
@@ -94,15 +68,15 @@ model Report {
 }
 
 model Form {
-  id            String     @id @default(cuid())
+  id            String  @id @default(cuid())
   title         String
   description   String?
-  type          FormType   @default(APPLICATION)
-  status        FormStatus @default(DRAFT)
-  formKey       String?    @unique
-  googleFormId  String?    @unique
+  type          String  @default("APPLICATION") // APPLICATION | REPORT | OTHER
+  status        String  @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
+  formKey       String? @unique
+  googleFormId  String? @unique
   googleFormUrl String?
-  questions     Json?
+  questions     String? // JSON: массив вопросов конструктора
 
   // ---- Настройки Discord-вебхука этой формы (приоритет над глобальными) ----
   webhookEnabled   Boolean @default(true)
@@ -126,18 +100,18 @@ model Form {
 }
 
 model FormSubmission {
-  id         String           @id @default(cuid())
+  id         String    @id @default(cuid())
   formId     String?
-  form       Form?            @relation(fields: [formId], references: [id], onDelete: SetNull)
-  externalId String?          @unique
-  answers    Json
+  form       Form?     @relation(fields: [formId], references: [id], onDelete: SetNull)
+  externalId String?   @unique
+  answers    String // JSON: массив { question, answer }
   employeeId String?
-  employee   Employee?        @relation(fields: [employeeId], references: [id], onDelete: SetNull)
-  status     SubmissionStatus @default(NEW)
-  meta       Json?
-  receivedAt DateTime         @default(now())
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  status     String    @default("NEW") // NEW | NOTIFIED | NO_EMPLOYEE | NO_FORM | FAILED
+  meta       String? // JSON: formTitle, respondentEmail, submittedAt, matchedBy
+  receivedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   deliveryJobs DeliveryJob[]
 
@@ -162,7 +136,7 @@ model Integration {
   id            String    @id @default(cuid())
   kind          String    @unique
   status        String    @default("not_configured")
-  details       Json?
+  details       String? // JSON
   lastCheckedAt DateTime?
   updatedAt     DateTime  @updatedAt
 }
@@ -187,7 +161,7 @@ model AuditLog {
   action     String
   entity     String?
   entityId   String?
-  details    Json?
+  details    String? // JSON (секреты маскируются при записи)
   ip         String?
   createdAt  DateTime @default(now())
 
@@ -201,8 +175,8 @@ model DeliveryJob {
   kind                String          @default("discord_webhook")
   targetUrlEnc        String?
   targetUrlMasked     String?
-  payload             Json
-  status              DeliveryStatus  @default(PENDING)
+  payload             String // JSON: тело Discord-вебхука
+  status              String          @default("PENDING") // PENDING | SENDING | DELIVERED | FAILED | DEAD
   attempts            Int             @default(0)
   maxAttempts         Int             @default(5)
   lastError           String?
@@ -220,6 +194,6 @@ model DeliveryJob {
 
 model AppSetting {
   key       String   @id
-  value     Json
+  value     String // JSON
   updatedAt DateTime @updatedAt
 }
